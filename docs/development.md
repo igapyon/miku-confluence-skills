@@ -13,11 +13,11 @@
 ## Upstream compatibility source
 
 - repository: <https://github.com/igapyon/miku-confluence>
-- release/tag: `v0.3.2`
+- release/tag: `v0.4.0`
 - Node.js requirement: `>=22`
-- CLI asset: `miku-confluence-0.3.2.mjs`
+- CLI asset: `miku-confluence-0.4.0.mjs`
 - asset SHA-256:
-  `b2151a83be946fe5f4cc34945d7c89165e0ca7cba97984640e6b72ded58cbd38`
+  `fe022508dcf0d6aa82d8865dacf218a2cb470f3f6d2f6f8a79660f21a544ae75`
 
 The local upstream checkout was inspected for product shape, but the bundled
 runtime was downloaded from the GitHub Release rather than copied from a local
@@ -40,7 +40,7 @@ Adopted decisions:
 - versioned runtime under the installed Skill directory
 - generated `index.json`, installable bundle tree, release ZIP, isolated smoke
 - explicit opt-in activation and visible upstream diagnostics
-- Node.js 22/24 CI because upstream `v0.3.2` requires Node.js 22 or newer
+- Node.js 22/24 CI because upstream `v0.4.0` requires Node.js 22 or newer
 
 Rejected decisions:
 

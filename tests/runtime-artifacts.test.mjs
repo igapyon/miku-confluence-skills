@@ -11,13 +11,13 @@ import {
 } from "../skills/igapyon-miku-confluence/lib/runtime-artifacts.mjs";
 
 const EXPECTED_SHA256 =
-  "b2151a83be946fe5f4cc34945d7c89165e0ca7cba97984640e6b72ded58cbd38";
+  "fe022508dcf0d6aa82d8865dacf218a2cb470f3f6d2f6f8a79660f21a544ae75";
 
 test("resolves and verifies the bundled Node CLI runtime", () => {
   const artifact = resolveRuntimeArtifact();
 
-  assert.equal(artifact.name, "miku-confluence-0.3.2.mjs");
-  assert.equal(artifact.version, "0.3.2");
+  assert.equal(artifact.name, "miku-confluence-0.4.0.mjs");
+  assert.equal(artifact.version, "0.4.0");
   assert.equal(fs.existsSync(resolveRuntimeArtifactPath()), true);
 
   const digest = crypto

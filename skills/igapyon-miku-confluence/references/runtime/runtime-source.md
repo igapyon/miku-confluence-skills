@@ -14,26 +14,26 @@ topics:
 ## Compatibility source
 
 - upstream repository: <https://github.com/igapyon/miku-confluence>
-- release: <https://github.com/igapyon/miku-confluence/releases/tag/v0.3.2>
-- compatibility version: `0.3.2`
+- release: <https://github.com/igapyon/miku-confluence/releases/tag/v0.4.0>
+- compatibility version: `0.4.0`
 - upstream Node.js requirement: `>=22`
 
 ## Bundled artifact
 
-- source asset: `miku-confluence-0.3.2.mjs`
-- installed path: `runtime/miku-confluence-0.3.2.mjs`
-- source size: `778872` bytes
+- source asset: `miku-confluence-0.4.0.mjs`
+- installed path: `runtime/miku-confluence-0.4.0.mjs`
+- source size: `782894` bytes
 - SHA-256:
-  `b2151a83be946fe5f4cc34945d7c89165e0ca7cba97984640e6b72ded58cbd38`
+  `fe022508dcf0d6aa82d8865dacf218a2cb470f3f6d2f6f8a79660f21a544ae75`
 
 Download URL:
 
 ```text
-https://github.com/igapyon/miku-confluence/releases/download/v0.3.2/miku-confluence-0.3.2.mjs
+https://github.com/igapyon/miku-confluence/releases/download/v0.4.0/miku-confluence-0.4.0.mjs
 ```
 
 This repository consumes the executable CLI asset. It does not rename or
-bundle `miku-confluence-runtime-0.3.2.mjs` as the CLI runtime.
+bundle `miku-confluence-runtime-0.4.0.mjs` as the CLI runtime.
 
 ## Update rule
 

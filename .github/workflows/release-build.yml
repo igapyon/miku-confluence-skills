@@ -32,9 +32,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          runtime="skills/igapyon-miku-confluence/runtime/miku-confluence-0.3.2.mjs"
+          runtime="skills/igapyon-miku-confluence/runtime/miku-confluence-0.4.0.mjs"
           test -s "${runtime}"
-          echo "b2151a83be946fe5f4cc34945d7c89165e0ca7cba97984640e6b72ded58cbd38  ${runtime}" | sha256sum --check --strict
+          echo "fe022508dcf0d6aa82d8865dacf218a2cb470f3f6d2f6f8a79660f21a544ae75  ${runtime}" | sha256sum --check --strict
           node "${runtime}" --version
           node "${runtime}" --help >/dev/null
 

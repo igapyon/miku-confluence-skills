@@ -8,7 +8,7 @@ test("runtime exposes version and help without credentials", () => {
   const help = runCli({ args: ["--help"] });
 
   assert.equal(version.status, 0);
-  assert.equal(version.stdout, "miku-confluence 0.3.2\n");
+  assert.equal(version.stdout, "0.4.0\n");
   assert.equal(help.status, 0);
   assert.match(help.stdout, /Confluence Cloud REST API v2 CLI/);
   assert.match(help.stdout, /--confirm-destructive/);

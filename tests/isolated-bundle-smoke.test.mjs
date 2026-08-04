@@ -34,7 +34,7 @@ test("generated bundle runs from an isolated install shape", async () => {
 
     const version = runCli({ args: ["--version"], cwd: isolatedRoot });
     assert.equal(version.status, 0);
-    assert.equal(version.stdout, "miku-confluence 0.3.2\n");
+    assert.equal(version.stdout, "0.4.0\n");
 
     const catalog = runCli({ args: ["operations", "list"], cwd: isolatedRoot });
     assert.equal(catalog.status, 0);
