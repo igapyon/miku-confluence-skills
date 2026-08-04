@@ -1,0 +1,16 @@
+{
+ "title": "igapyon-miku-confluence Skill Index",
+ "generator": "miku-indexgen",
+ "generation": {"schemaVersion":1,"inputPath":".","markdownOutput":false,"recursive":true,"includeExtensions":["md","mjs","json"],"inputEncoding":"utf8","outputEncoding":"utf8","title":"igapyon-miku-confluence Skill Index","includeGeneratorMetadata":true},
+ "basePath": ".",
+ "files": [
+  {"name":"SKILL.md","path":"SKILL.md","ext":"md","dir":"","size":5628,"description":"Use only when the user explicitly names `miku-confluence`, `miku-confluence-skills`, or `igapyon-miku-confluence`, or explicitly asks to apply this Skill for miku-confluence-specific Confluence Cloud REST API v2 workflows. Do not activate for generic Co...","summary":"miku-confluence"},
+  {"name":"cli-runner.mjs","path":"lib/cli-runner.mjs","ext":"mjs","dir":"lib","size":874},
+  {"name":"runtime-artifacts.mjs","path":"lib/runtime-artifacts.mjs","ext":"mjs","dir":"lib","size":2343},
+  {"name":"INDEX.md","path":"references/INDEX.md","ext":"md","dir":"references","size":714,"title":"igapyon-miku-confluence references","description":"Navigation for the bundled miku-confluence workflow and runtime references.","topics":["miku-confluence","confluence-cloud","agent-skill","runtime","workflow"],"summary":"References"},
+  {"name":"operations-map.md","path":"references/runtime/operations-map.md","ext":"md","dir":"references/runtime","size":3723,"title":"miku-confluence v0.3.2 operations map","description":"Agent-facing mapping of miku-confluence CLI operations, permissions, confirmations, and artifacts.","topics":["miku-confluence","operations","permissions","cli","diagnostics"],"summary":"Operations Map"},
+  {"name":"runtime-source.md","path":"references/runtime/runtime-source.md","ext":"md","dir":"references/runtime","size":1538,"title":"miku-confluence runtime source","description":"Provenance and integrity contract for the bundled miku-confluence Node CLI.","topics":["miku-confluence","runtime","provenance","sha256","github-release"],"summary":"Runtime Source"},
+  {"name":"confluence-workflow.md","path":"references/workflow/confluence-workflow.md","ext":"md","dir":"references/workflow","size":3058,"title":"miku-confluence agent workflow","description":"Safe execution sequence for metadata, offline, live read-only, and reviewed live-write operations.","topics":["miku-confluence","workflow","confluence-cloud","review","safety"],"summary":"Confluence Workflow"},
+  {"name":"miku-confluence-0.3.2.mjs","path":"runtime/miku-confluence-0.3.2.mjs","ext":"mjs","dir":"runtime","size":778872}
+ ]
+}

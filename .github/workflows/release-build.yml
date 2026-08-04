@@ -1,0 +1,81 @@
+name: Build And Upload Release Asset
+
+on:
+  release:
+    types:
+      - published
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-upload:
+    runs-on: ubuntu-latest
+    if: startsWith(github.event.release.tag_name, 'v')
+
+    steps:
+      - name: Checkout release tag
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.release.tag_name }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify runtime artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          runtime="skills/igapyon-miku-confluence/runtime/miku-confluence-0.3.2.mjs"
+          test -s "${runtime}"
+          echo "b2151a83be946fe5f4cc34945d7c89165e0ca7cba97984640e6b72ded58cbd38  ${runtime}" | sha256sum --check --strict
+          node "${runtime}" --version
+          node "${runtime}" --help >/dev/null
+
+      - name: Verify release tag version
+        id: release_version
+        shell: bash
+        env:
+          TAG_NAME: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          version="${TAG_NAME#v}"
+          package_version="$(node -p "require('./package.json').version")"
+          case "${version}" in
+            "${package_version}"|"${package_version}".*) ;;
+            *)
+              echo "Release tag version (${version}) must match package.json (${package_version}) or use a dot suffix." >&2
+              exit 1
+              ;;
+          esac
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+          echo "package_version=${package_version}" >> "${GITHUB_OUTPUT}"
+
+      - name: Build release bundle
+        run: npm run build
+
+      - name: Prepare release zip
+        id: prepare_zip
+        shell: bash
+        run: |
+          set -euo pipefail
+          source_zip="bundle/igapyon-miku-confluence-skills-${{ steps.release_version.outputs.package_version }}.zip"
+          target_zip="release-assets/igapyon-miku-confluence-skills-${{ steps.release_version.outputs.version }}.zip"
+          test -s "${source_zip}"
+          mkdir -p release-assets
+          cp "${source_zip}" "${target_zip}"
+          echo "zip_path=${target_zip}" >> "${GITHUB_OUTPUT}"
+
+      - name: Upload zip to GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ github.event.release.tag_name }}
+          files: ${{ steps.prepare_zip.outputs.zip_path }}
+          draft: false
+          prerelease: false
