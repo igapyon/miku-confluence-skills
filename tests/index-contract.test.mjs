@@ -22,7 +22,7 @@ test("generated index contains the required bundled Skill files", () => {
     "references/runtime/operations-map.md",
     "references/runtime/runtime-source.md",
     "references/workflow/confluence-workflow.md",
-    "runtime/miku-confluence-0.3.2.mjs"
+    "runtime/miku-confluence-0.4.0.mjs"
   ]) {
     assert.equal(paths.has(requiredPath), true, `missing index entry: ${requiredPath}`);
   }

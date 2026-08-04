@@ -57,7 +57,7 @@ test("release zip contains the installable Skill and excludes development files"
     "skills/igapyon-miku-confluence/references/runtime/operations-map.md",
     "skills/igapyon-miku-confluence/references/runtime/runtime-source.md",
     "skills/igapyon-miku-confluence/references/workflow/confluence-workflow.md",
-    "skills/igapyon-miku-confluence/runtime/miku-confluence-0.3.2.mjs"
+    "skills/igapyon-miku-confluence/runtime/miku-confluence-0.4.0.mjs"
   ]) {
     assert.equal(entries.includes(requiredEntry), true, `missing zip entry: ${requiredEntry}`);
   }

@@ -1,5 +1,5 @@
 ---
-title: miku-confluence v0.3.2 operations map
+title: miku-confluence v0.4.0 operations map
 description: Agent-facing mapping of miku-confluence CLI operations, permissions, confirmations, and artifacts.
 topics:
   - miku-confluence
@@ -44,7 +44,7 @@ their JSON input. Never infer or reconstruct that digest.
 
 ## Faithful REST API v2 operations
 
-Implemented live read operations in `v0.3.2`:
+Implemented live read operations in `v0.4.0`:
 
 - `api.v2.getAttachmentById`
 - `api.v2.getAttachmentLabels`
@@ -81,14 +81,14 @@ Do not call planned or excluded operations. Inspect their catalog records only.
 ## CLI shape
 
 ```text
-node runtime/miku-confluence-0.3.2.mjs call <operation> \
+node runtime/miku-confluence-0.4.0.mjs call <operation> \
   --input <request.json|-> [--allow <permissions>] [--dry-run] \
   [--confirm-destructive] [--verbose]
 ```
 
-Use one UTF-8 JSON object as input. Normal results are one JSON document on
-stdout. Treat stderr as diagnostics or failure information; do not merge it
-into stdout JSON.
+Use one UTF-8 JSON object as input. `--version` prints the semantic version as
+plain text; other normal results are one JSON document on stdout. Treat stderr
+as diagnostics or failure information; do not merge it into stdout JSON.
 
 ## Artifact roles
 

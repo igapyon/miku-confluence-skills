@@ -12,8 +12,8 @@ Release から受領した CLI runtime を薄い workflow adapter から呼び�
 
 - repository/package: `miku-confluence-skills`
 - installed Agent Skill: `igapyon-miku-confluence`
-- upstream compatibility source: `miku-confluence` `v0.3.2`
-- bundled runtime: `miku-confluence-0.3.2.mjs`
+- upstream compatibility source: `miku-confluence` `v0.4.0`
+- bundled runtime: `miku-confluence-0.4.0.mjs`
 - runtime policy: Node CLI-only
 - required Node.js version: 22 or newer
 
@@ -33,15 +33,15 @@ npm run build
 ZIP を生成します。
 
 ```text
-bundle/igapyon-miku-confluence-skills-0.3.2.zip
+bundle/igapyon-miku-confluence-skills-0.4.0.zip
 ```
 
 ZIP は `skills/igapyon-miku-confluence/` をルート配下に含みます。
 
 ## Runtime provenance
 
-Runtime は GitHub Release `v0.3.2` の
-`miku-confluence-0.3.2.mjs` です。取得元、SHA-256、更新手順は
+Runtime は GitHub Release `v0.4.0` の
+`miku-confluence-0.4.0.mjs` です。取得元、SHA-256、更新手順は
 [Runtime Source](skills/igapyon-miku-confluence/references/runtime/runtime-source.md)
 を参照してください。
 

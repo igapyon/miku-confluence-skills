@@ -18,7 +18,7 @@ function main() {
   requireFile(path.resolve(sourceSkillRoot, "SKILL.md"));
   requireFile(path.resolve(sourceSkillRoot, "index.json"));
   requireFile(
-    path.resolve(sourceSkillRoot, "runtime", "miku-confluence-0.3.2.mjs")
+    path.resolve(sourceSkillRoot, "runtime", "miku-confluence-0.4.0.mjs")
   );
 
   fs.rmSync(bundleRoot, {

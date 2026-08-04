@@ -27,7 +27,7 @@ test("live write boundaries remain explicit", () => {
 });
 
 test("package and upstream runtime versions stay aligned", () => {
-  assert.equal(packageJson.version, "0.3.2");
+  assert.equal(packageJson.version, "0.4.0");
   assert.equal(packageJson.engines.node, ">=22");
-  assert.match(skill, /runtime\/miku-confluence-0\.3\.2\.mjs/);
+  assert.match(skill, /runtime\/miku-confluence-0\.4\.0\.mjs/);
 });

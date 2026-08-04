@@ -810,12 +810,27 @@ function helpText() {
     "Usage:",
     "  miku-confluence --version",
     "  miku-confluence --help | -h",
-    "  miku-confluence config init",
-    "  miku-confluence operations list",
+    "  miku-confluence config [--help | -h]",
+    "  miku-confluence config init [--help | -h]",
+    "  miku-confluence operations [--help | -h]",
+    "  miku-confluence operations list [--summary]",
     "  miku-confluence operations describe <operation>",
     "  miku-confluence call <operation> [--input <file|->] [--allow <permissions>] [--dry-run] [--confirm-destructive] [--verbose]",
     "",
+    "AI agent quick start:",
+    "  1. Run operations list --summary to discover reviewed operations.",
+    "  2. Run operations describe <operation> to obtain its input JSON Schema and safety fields.",
+    "  3. Run call <operation> --dry-run --input <file|-> to validate without reading credentials or making a request.",
+    "  4. For CREATE, UPDATE, or DELETE, wait for explicit human approval before adding the required --allow permission and --confirm-destructive.",
+    "",
+    "Call contract:",
+    "  --input - is the default and reads one UTF-8 JSON object from stdin.",
+    "  Permissions are READ, CREATE, UPDATE, and DELETE; --allow defaults to READ.",
+    "  --version prints only the semantic version. Other commands emit one JSON document on stdout, except plain-text help.",
+    "  Exit codes: 0 success, 1 operation failure, 2 input or usage failure, 3 unexpected runtime failure.",
+    "",
     "Implemented API operations perform one Confluence REST API v2 request. Planned and excluded operations remain inspectable but cannot be called.",
+    "page.export-subtree exports a remote page subtree to a new local snapshot. page.prepare-markdown-create creates a local, reviewable child-page plan without contacting Confluence.",
     "snapshot.export-markdown is an offline Workflow: it converts a finalized local API snapshot and never reads credentials or contacts Confluence.",
     "page.inspect-markdown-preservation checks a Markdown sidecar and block mapping locally; it generates neither candidate Storage XML nor a Confluence request.",
     "page.prepare-markdown-update accepts an explicit preservation profile for local review-only candidate Storage; that profile cannot be applied yet.",
@@ -824,6 +839,43 @@ function helpText() {
     "snapshot.prepare-import makes a local create-only plan from a complete Storage snapshot; it does not contact Confluence.",
     "snapshot.apply-import creates a reviewed snapshot subtree only with CREATE permission, a matching plan digest, and --confirm-destructive.",
     "config init creates a values-empty .env template only when it is absent; it never loads or overwrites the file.",
+    ""
+  ].join("\n");
+}
+function configHelpText() {
+  return [
+    "Usage:",
+    "  miku-confluence config init",
+    "",
+    "config init creates a values-empty .env template only when it is absent.",
+    "It never reads, loads, or overwrites an existing .env file, and never contacts Confluence.",
+    ""
+  ].join("\n");
+}
+function operationsHelpText() {
+  return [
+    "Usage:",
+    "  miku-confluence operations list [--summary]",
+    "  miku-confluence operations describe <operation>",
+    "",
+    "operations list emits the complete reviewed catalog, including each input schema.",
+    "operations list --summary emits compact discovery fields only; use it before describe when context size matters.",
+    "operations describe <operation> emits one complete entry with its input JSON Schema, required permission, dry-run support, and confirmation requirement.",
+    "All operations metadata commands are local-only and require neither credentials nor network access.",
+    ""
+  ].join("\n");
+}
+function callHelpText() {
+  return [
+    "Usage:",
+    "  miku-confluence call <operation> [--input <file|->] [--allow <permissions>] [--dry-run] [--confirm-destructive] [--verbose]",
+    "",
+    "Before calling, use operations describe <operation> to obtain the required JSON input schema and safety fields.",
+    "--input - is the default and reads exactly one UTF-8 JSON object from stdin.",
+    "--allow accepts comma-separated READ, CREATE, UPDATE, and DELETE permissions and defaults to READ.",
+    "--dry-run validates the operation without resolving credentials, contacting Confluence, or mutating the filesystem.",
+    "CREATE, UPDATE, and DELETE operations require explicit human approval before an actual call; operations that require confirmation also need --confirm-destructive.",
+    "stdout emits one JSON result envelope. --verbose emits redacted metadata only on stderr.",
     ""
   ].join("\n");
 }
@@ -9871,6 +9923,7 @@ function exportMarkdownDryRun(input) {
       outputDirectory: input.outputDirectory,
       artifacts: [
         "markdown-export.json",
+        "index.md",
         "tree.json",
         "pages/<pageId>/page.md",
         "pages/<pageId>/page.metadata.json",
@@ -9969,6 +10022,7 @@ async function exportSnapshotAsMarkdown(input) {
       if (pageDiagnostics.some((diagnostic4) => diagnostic4.severity === "warning")) counts.pagesWithWarnings += 1;
       diagnostics.push(...pageDiagnostics);
     }
+    await writer.writeIndex(markdownIndex(source.value));
     const manifest = {
       schemaVersion: "miku-confluence.markdown-export/v1",
       complete: true,
@@ -9976,7 +10030,7 @@ async function exportSnapshotAsMarkdown(input) {
         snapshotSchemaVersion: "miku-confluence.export/v1",
         rootPageId: source.value.rootPageId
       },
-      paths: { tree: "tree.json", pages: "pages" },
+      paths: { index: "index.md", tree: "tree.json", pages: "pages" },
       counts,
       diagnostics: {
         summary: diagnosticSummary(diagnostics),
@@ -10024,10 +10078,17 @@ async function readSourceSnapshot(inputDirectory) {
   const pagesRootStat = await safeLstat(pagesRoot);
   if (pagesRootStat === void 0 || !pagesRootStat.isDirectory() || pagesRootStat.isSymbolicLink()) return invalidSnapshot();
   const pageIds = [];
+  const treeNodes = [];
   for (const node of treeValue.nodes) {
     if (!isRecord5(node) || !isPageId2(node.pageId) || node.artifactStatus !== "written") return invalidSnapshot();
     if (pageIds.includes(node.pageId)) return invalidSnapshot();
+    const traversalParentPageId = node.traversalParentPageId;
+    if (traversalParentPageId !== void 0 && traversalParentPageId !== null && !isPageId2(traversalParentPageId)) return invalidSnapshot();
     pageIds.push(node.pageId);
+    treeNodes.push({
+      pageId: node.pageId,
+      traversalParentPageId: typeof traversalParentPageId === "string" ? traversalParentPageId : void 0
+    });
   }
   if (pageIds.length === 0 || !pageIds.includes(manifest.rootPageId)) return invalidSnapshot();
   const pages = [];
@@ -10062,6 +10123,7 @@ async function readSourceSnapshot(inputDirectory) {
     value: {
       rootPageId: manifest.rootPageId,
       tree,
+      treeNodes,
       pages,
       attachmentsByPageId,
       attachmentArtifactsByPageId,
@@ -10136,6 +10198,41 @@ function diagnosticSummary(items) {
     warning: items.filter((item) => item.severity === "warning").length,
     error: items.filter((item) => item.severity === "error").length
   };
+}
+function markdownIndex(source) {
+  const pagesById = new Map(source.pages.map((page) => [page.pageId, page]));
+  const root = pagesById.get(source.rootPageId);
+  if (root === void 0) throw new Error("The Markdown export root page is missing.");
+  const childrenByParent = /* @__PURE__ */ new Map();
+  for (const node of source.treeNodes) {
+    const parent = node.traversalParentPageId;
+    if (parent === void 0 || parent === node.pageId || !pagesById.has(parent)) continue;
+    const children = childrenByParent.get(parent) ?? [];
+    children.push(node.pageId);
+    childrenByParent.set(parent, children);
+  }
+  const lines = [
+    "# Confluence export: " + escapeHeading(root.title),
+    "",
+    "Generated navigation. Page contents are stored below pages/<pageId>/page.md.",
+    ""
+  ];
+  const visited = /* @__PURE__ */ new Set();
+  const appendPage = (pageId, depth) => {
+    if (visited.has(pageId)) return;
+    const page = pagesById.get(pageId);
+    if (page === void 0) return;
+    visited.add(pageId);
+    lines.push("  ".repeat(depth) + "- [" + escapeHeading(page.title) + "](pages/" + page.pageId + "/page.md)");
+    for (const childId of childrenByParent.get(pageId) ?? []) appendPage(childId, depth + 1);
+  };
+  appendPage(source.rootPageId, 0);
+  const additional = source.treeNodes.filter((node) => !visited.has(node.pageId));
+  if (additional.length > 0) {
+    lines.push("", "## Additional exported pages", "");
+    for (const node of additional) appendPage(node.pageId, 0);
+  }
+  return lines.join("\n") + "\n";
 }
 async function safeLstat(path2) {
   try {
@@ -10284,6 +10381,9 @@ var init_markdown_export = __esm({
       async writeTree(tree) {
         await writeFile3(resolve2(this.stagingDirectory, "tree.json"), tree, "utf8");
       }
+      async writeIndex(markdown) {
+        await writeFile3(resolve2(this.stagingDirectory, "index.md"), markdown, "utf8");
+      }
       async copyAttachment(pageId, attachment) {
         const directory = await this.attachmentDirectory(pageId, attachment.attachmentId);
         await copyFile(attachment.sourcePath, resolve2(directory, attachment.contentPath));
@@ -10337,6 +10437,61 @@ var init_markdown_export = __esm({
         const directory = resolve2(await this.pageDirectory(pageId), "attachments", attachmentId);
         await mkdir2(directory, { recursive: true });
         return directory;
+      }
+    };
+  }
+});
+
+// src/adapters/filesystem/atomic-artifact-writer.ts
+import { lstat as lstat3, mkdir as mkdir3, mkdtemp as mkdtemp3, rename as rename3, rm as rm3, writeFile as writeFile4 } from "node:fs/promises";
+import { basename as basename3, dirname as dirname3, resolve as resolve3, sep } from "node:path";
+function isNotFound2(error) {
+  return typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT";
+}
+var AtomicArtifactWriter;
+var init_atomic_artifact_writer = __esm({
+  "src/adapters/filesystem/atomic-artifact-writer.ts"() {
+    "use strict";
+    init_json();
+    init_markdown_storage_profile();
+    AtomicArtifactWriter = class _AtomicArtifactWriter {
+      constructor(finalDirectory, stagingDirectory) {
+        this.finalDirectory = finalDirectory;
+        this.stagingDirectory = stagingDirectory;
+      }
+      finalDirectory;
+      stagingDirectory;
+      static async create(plan) {
+        const prefix = `.${basename3(plan.finalDirectory)}.miku-confluence-staging-`;
+        const stagingDirectory = await mkdtemp3(resolve3(dirname3(plan.finalDirectory), prefix));
+        return new _AtomicArtifactWriter(plan.finalDirectory, stagingDirectory);
+      }
+      async writeArtifact(path2, value) {
+        await this.writeText(path2, value);
+        return { path: path2, sha256: sha256(value) };
+      }
+      async writeJson(path2, value) {
+        await this.writeText(path2, `${stringifyJson(value)}
+`);
+      }
+      async finalize() {
+        try {
+          await lstat3(this.finalDirectory);
+          throw new Error("final output exists");
+        } catch (error) {
+          if (!isNotFound2(error)) throw error;
+        }
+        await rename3(this.stagingDirectory, this.finalDirectory);
+      }
+      async abort() {
+        await rm3(this.stagingDirectory, { recursive: true, force: true });
+      }
+      async writeText(path2, value) {
+        const target = resolve3(this.stagingDirectory, path2);
+        const boundary = `${this.stagingDirectory}${sep}`;
+        if (!target.startsWith(boundary)) throw new Error("artifact path must stay inside the staging directory");
+        await mkdir3(dirname3(target), { recursive: true });
+        await writeFile4(target, value, "utf8");
       }
     };
   }
@@ -10546,8 +10701,8 @@ var init_block_presentation = __esm({
 });
 
 // src/adapters/filesystem/markdown-preserving-update-prepare.ts
-import { lstat as lstat3, mkdir as mkdir3, mkdtemp as mkdtemp3, readFile as readFile2, rename as rename3, rm as rm3, writeFile as writeFile4 } from "node:fs/promises";
-import { basename as basename3, dirname as dirname3, resolve as resolve3 } from "node:path";
+import { lstat as lstat4, readFile as readFile2 } from "node:fs/promises";
+import { dirname as dirname4, resolve as resolve4 } from "node:path";
 async function preparePreservingMarkdownUpdateFromSnapshot(input) {
   const source = await readPreservingSource(input);
   if (source.ok === false) return prepareMarkdownUpdateFailure([source.diagnostic]);
@@ -10555,7 +10710,7 @@ async function preparePreservingMarkdownUpdateFromSnapshot(input) {
   if (outputPlan.ok === false) return prepareMarkdownUpdateFailure([outputPlan.diagnostic]);
   let writer;
   try {
-    writer = await PreservingUpdateWriter.create(outputPlan.value);
+    writer = await AtomicArtifactWriter.create(outputPlan.value);
     const mapped = mapPreservationBlocks(source.value.sidecar.blocks, source.value.working.blocks);
     const mappingByKey = new Map(mapped.mappings.map((mapping) => [mapping.blockKey, mapping]));
     const diagnostics = [];
@@ -10815,18 +10970,18 @@ async function preparePreservingMarkdownUpdateFromSnapshot(input) {
 }
 async function writePreservingOutcome(input) {
   const artifacts = {
-    baseStorage: await input.writer.writeArtifact("baseStorage", input.source.baseStorage),
-    workingMarkdown: await input.writer.writeArtifact("workingMarkdown", input.source.workingMarkdown),
-    blockMapping: await input.writer.writeArtifact("blockMapping", `${stringifyJson({ schemaVersion: "miku-confluence.markdown-block-mapping/v1", profileVersion: preservationProfileVersion, pageId: input.source.pageId, mappings: input.mapped.mappings, newWorkingMarkdownPaths: input.mapped.newWorkingMarkdownPaths })}
+    baseStorage: await input.writer.writeArtifact(artifactPath("baseStorage"), input.source.baseStorage),
+    workingMarkdown: await input.writer.writeArtifact(artifactPath("workingMarkdown"), input.source.workingMarkdown),
+    blockMapping: await input.writer.writeArtifact(artifactPath("blockMapping"), `${stringifyJson({ schemaVersion: "miku-confluence.markdown-block-mapping/v1", profileVersion: preservationProfileVersion, pageId: input.source.pageId, mappings: input.mapped.mappings, newWorkingMarkdownPaths: input.mapped.newWorkingMarkdownPaths })}
 `),
-    preservationLedger: await input.writer.writeArtifact("preservationLedger", `${stringifyJson({ schemaVersion: "miku-confluence.markdown-preservation-ledger/v2", profileVersion: preservationProfileVersion, pageId: input.source.pageId, items: input.ledger })}
+    preservationLedger: await input.writer.writeArtifact(artifactPath("preservationLedger"), `${stringifyJson({ schemaVersion: "miku-confluence.markdown-preservation-ledger/v2", profileVersion: preservationProfileVersion, pageId: input.source.pageId, items: input.ledger })}
 `)
   };
-  if (input.candidateStorage !== void 0) artifacts.candidateStorage = await input.writer.writeArtifact("candidateStorage", input.candidateStorage);
-  if (input.previewMarkdown !== void 0) artifacts.previewMarkdown = await input.writer.writeArtifact("previewMarkdown", input.previewMarkdown);
-  artifacts.candidatePreservation = await input.writer.writeArtifact("candidatePreservation", `${stringifyJson({ schemaVersion: candidatePreservationSchemaVersion, profileVersion: preservationProfileVersion, pageId: input.source.pageId, sourceSidecarSha256: input.source.sidecarSha256, candidateStorageSha256: input.candidateStorage === void 0 ? void 0 : sha256(input.candidateStorage), items: input.ledger })}
+  if (input.candidateStorage !== void 0) artifacts.candidateStorage = await input.writer.writeArtifact(artifactPath("candidateStorage"), input.candidateStorage);
+  if (input.previewMarkdown !== void 0) artifacts.previewMarkdown = await input.writer.writeArtifact(artifactPath("previewMarkdown"), input.previewMarkdown);
+  artifacts.candidatePreservation = await input.writer.writeArtifact(artifactPath("candidatePreservation"), `${stringifyJson({ schemaVersion: candidatePreservationSchemaVersion, profileVersion: preservationProfileVersion, pageId: input.source.pageId, sourceSidecarSha256: input.source.sidecarSha256, candidateStorageSha256: input.candidateStorage === void 0 ? void 0 : sha256(input.candidateStorage), items: input.ledger })}
 `);
-  artifacts.diagnostics = await input.writer.writeArtifact("diagnostics", `${stringifyJson(diagnosticsDocument(input.source.pageId, input.diagnostics, input.blockerCount))}
+  artifacts.diagnostics = await input.writer.writeArtifact(artifactPath("diagnostics"), `${stringifyJson(diagnosticsDocument(input.source.pageId, input.diagnostics, input.blockerCount))}
 `);
   const plan = {
     schemaVersion: preservingPlanSchemaVersion,
@@ -10850,7 +11005,7 @@ async function writePreservingOutcome(input) {
     safety: { requiredPermission: "READ", applyAvailable: false, automaticRetry: false, automaticMerge: false }
   };
   const planDigest = sha256(canonicalJson(plan));
-  await input.writer.writePlan({ ...plan, planDigest: { algorithm: "sha256", canonicalization: "RFC8785", value: planDigest } });
+  await input.writer.writeJson("update-plan.json", { ...plan, planDigest: { algorithm: "sha256", canonicalization: "RFC8785", value: planDigest } });
   await input.writer.finalize();
   const result3 = { pageId: input.source.pageId, outputDirectory: input.outputDirectory, action: input.action, applyEligible: false, planDigest };
   return {
@@ -10863,31 +11018,31 @@ async function writePreservingOutcome(input) {
   };
 }
 async function readPreservingSource(input) {
-  const root = resolve3(input.snapshotDirectory);
+  const root = resolve4(input.snapshotDirectory);
   const rootStat = await safeLstat2(root);
   if (rootStat === void 0 || !rootStat.isDirectory() || rootStat.isSymbolicLink()) return invalidSnapshot2();
-  const manifest = await readJsonFile2(resolve3(root, "export.json"));
-  const tree = await readJsonFile2(resolve3(root, "tree.json"));
+  const manifest = await readJsonFile2(resolve4(root, "export.json"));
+  const tree = await readJsonFile2(resolve4(root, "tree.json"));
   if (!isRecord7(manifest) || manifest.schemaVersion !== "miku-confluence.export/v1" || manifest.complete !== true || !isRecord7(tree) || tree.schemaVersion !== "miku-confluence.tree/v1" || !Array.isArray(tree.nodes)) return invalidSnapshot2();
   if (!tree.nodes.some((node) => isRecord7(node) && node.pageId === input.pageId && node.artifactStatus === "written")) return sourceFailure("PAGE_ID_MISMATCH", "The requested page ID is not a written page in the complete snapshot.", input.pageId);
-  const pageDirectory = resolve3(root, "pages", input.pageId);
+  const pageDirectory = resolve4(root, "pages", input.pageId);
   const pageDirectoryStat = await safeLstat2(pageDirectory);
   if (pageDirectoryStat === void 0 || !pageDirectoryStat.isDirectory() || pageDirectoryStat.isSymbolicLink()) return invalidSnapshot2();
-  const page = await readJsonFile2(resolve3(pageDirectory, "page.api-v2.json"));
-  const storage = await readRegularTextFile2(resolve3(pageDirectory, "body.storage.xml"));
+  const page = await readJsonFile2(resolve4(pageDirectory, "page.api-v2.json"));
+  const storage = await readRegularTextFile2(resolve4(pageDirectory, "body.storage.xml"));
   if (!isRecord7(page) || page.id !== input.pageId || page.status !== "current" || typeof page.title !== "string" || !isRecord7(page.version) || typeof page.version.number !== "number" || !Number.isSafeInteger(page.version.number) || page.version.number < 1 || storage === void 0 || storageValue2(page) !== storage) return invalidSnapshot2();
   const pageVersion2 = page.version.number;
   const baseStorageSha256 = sha256(storage);
   if (input.expectedBaseStorageSha256 !== void 0 && input.expectedBaseStorageSha256 !== baseStorageSha256) return sourceFailure("SOURCE_DIGEST_MISMATCH", "The expected base Storage XML digest does not match the complete snapshot.", input.pageId, "$.expectedBaseStorageSha256");
-  const workingMarkdown = await readRegularTextFile2(resolve3(input.workingMarkdownPath));
+  const workingMarkdown = await readRegularTextFile2(resolve4(input.workingMarkdownPath));
   if (workingMarkdown === void 0) return sourceFailure("INVALID_INPUT", "The working Markdown path must name a regular, non-symbolic-link UTF-8 file.", input.pageId, "$.workingMarkdownPath");
   if (input.expectedWorkingMarkdownSha256 !== void 0 && input.expectedWorkingMarkdownSha256 !== sha256(workingMarkdown)) return sourceFailure("SOURCE_DIGEST_MISMATCH", "The expected working Markdown digest does not match the input file.", input.pageId, "$.expectedWorkingMarkdownSha256");
   const working = parsePreservationDocument(workingMarkdown, page.title);
   if (working.ok === false) return sourceFailure("PRESERVATION_FRONT_MATTER_INVALID", working.reason, input.pageId, "$.workingMarkdownPath");
   if (working.value.frontMatter.pageId !== input.pageId || working.value.frontMatter.storageSha256 !== baseStorageSha256 || working.value.frontMatter.version !== pageVersion2 || working.value.frontMatter.spaceId !== void 0 && working.value.frontMatter.spaceId !== page.spaceId) return sourceFailure("PRESERVATION_BASE_MISMATCH", "The working Markdown provenance does not match the complete snapshot page.", input.pageId, "$.workingMarkdownPath");
-  const workingDirectory = dirname3(resolve3(input.workingMarkdownPath));
-  const sidecarPath = resolve3(workingDirectory, working.value.frontMatter.attributesPath);
-  if (sidecarPath !== resolve3(workingDirectory, "page.attributes.json")) return sourceFailure("PRESERVATION_SIDECAR_MISSING", "The generated attribute sidecar path is unsafe or unsupported.", input.pageId, "$.workingMarkdownPath");
+  const workingDirectory = dirname4(resolve4(input.workingMarkdownPath));
+  const sidecarPath = resolve4(workingDirectory, working.value.frontMatter.attributesPath);
+  if (sidecarPath !== resolve4(workingDirectory, "page.attributes.json")) return sourceFailure("PRESERVATION_SIDECAR_MISSING", "The generated attribute sidecar path is unsafe or unsupported.", input.pageId, "$.workingMarkdownPath");
   const sidecarText = await readRegularTextFile2(sidecarPath);
   if (sidecarText === void 0) return sourceFailure("PRESERVATION_SIDECAR_MISSING", "The generated attribute sidecar is missing or unsafe.", input.pageId, "$.workingMarkdownPath");
   const sidecarSha256 = sha256(sidecarText);
@@ -11448,7 +11603,7 @@ function invalidSnapshot2() {
 }
 async function safeLstat2(path2) {
   try {
-    return await lstat3(path2);
+    return await lstat4(path2);
   } catch {
     return void 0;
   }
@@ -11483,7 +11638,7 @@ function storageValue2(page) {
   const body = page.body;
   return isRecord7(body) && isRecord7(body.storage) && typeof body.storage.value === "string" ? body.storage.value : void 0;
 }
-var import_xmldom4, preservingPlanSchemaVersion, candidatePreservationSchemaVersion, serializer2, presentationNames, PreservingUpdateWriter;
+var import_xmldom4, preservingPlanSchemaVersion, candidatePreservationSchemaVersion, serializer2, presentationNames;
 var init_markdown_preserving_update_prepare = __esm({
   "src/adapters/filesystem/markdown-preserving-update-prepare.ts"() {
     "use strict";
@@ -11493,47 +11648,18 @@ var init_markdown_preserving_update_prepare = __esm({
     init_markdown_storage_profile();
     init_preservation();
     init_prepare_markdown_update();
+    init_atomic_artifact_writer();
     init_snapshot_writer();
     preservingPlanSchemaVersion = "miku-confluence.markdown-preserving-update-plan/v1";
     candidatePreservationSchemaVersion = "miku-confluence.markdown-candidate-preservation/v1";
     serializer2 = new import_xmldom4.XMLSerializer();
     presentationNames = /* @__PURE__ */ new Set(["background-color", "color", "font-size", "margin-left", "text-align"]);
-    PreservingUpdateWriter = class _PreservingUpdateWriter {
-      constructor(plan, stagingDirectory) {
-        this.plan = plan;
-        this.stagingDirectory = stagingDirectory;
-      }
-      plan;
-      stagingDirectory;
-      static async create(plan) {
-        const stagingDirectory = await mkdtemp3(resolve3(dirname3(plan.finalDirectory), `.${basename3(plan.finalDirectory)}.miku-confluence-staging-`));
-        return new _PreservingUpdateWriter(plan, stagingDirectory);
-      }
-      async writeArtifact(name, value) {
-        const path2 = artifactPath(name);
-        const target = resolve3(this.stagingDirectory, path2);
-        await mkdir3(dirname3(target), { recursive: true });
-        await writeFile4(target, value, "utf8");
-        return { path: path2, sha256: sha256(value) };
-      }
-      async writePlan(value) {
-        await writeFile4(resolve3(this.stagingDirectory, "update-plan.json"), `${stringifyJson(value)}
-`, "utf8");
-      }
-      async finalize() {
-        if (await safeLstat2(this.plan.finalDirectory) !== void 0) throw new Error("final output exists");
-        await rename3(this.stagingDirectory, this.plan.finalDirectory);
-      }
-      async abort() {
-        await rm3(this.stagingDirectory, { recursive: true, force: true });
-      }
-    };
   }
 });
 
 // src/adapters/filesystem/markdown-update-prepare.ts
-import { lstat as lstat4, mkdir as mkdir4, mkdtemp as mkdtemp4, readFile as readFile3, rename as rename4, rm as rm4, writeFile as writeFile5 } from "node:fs/promises";
-import { basename as basename4, dirname as dirname4, resolve as resolve4 } from "node:path";
+import { lstat as lstat5, readFile as readFile3 } from "node:fs/promises";
+import { resolve as resolve5 } from "node:path";
 async function prepareMarkdownUpdateFromSnapshot(input) {
   if (input.preservationProfile !== void 0) return preparePreservingMarkdownUpdateFromSnapshot(input);
   const source = await readPrepareSource(input);
@@ -11542,7 +11668,7 @@ async function prepareMarkdownUpdateFromSnapshot(input) {
   if (outputPlan.ok === false) return prepareMarkdownUpdateFailure([outputPlan.diagnostic]);
   let writer;
   try {
-    writer = await MarkdownUpdateWriter.create(outputPlan.value);
+    writer = await AtomicArtifactWriter.create(outputPlan.value);
     const base = parseStorageToNormalized(source.value.baseStorage, source.value.title);
     const initialMarkdown = base.ok ? renderMarkdown(base.value) : readOnlyInitialMarkdown(source.value);
     const working = parseWorkingMarkdown(source.value.workingMarkdown, source.value.title);
@@ -11616,12 +11742,12 @@ async function prepareMarkdownUpdateFromSnapshot(input) {
   }
 }
 async function readPrepareSource(input) {
-  const root = resolve4(input.snapshotDirectory);
+  const root = resolve5(input.snapshotDirectory);
   const rootStat = await safeLstat3(root);
   if (rootStat === void 0 || !rootStat.isDirectory() || rootStat.isSymbolicLink()) return invalidSnapshot3();
-  const manifest = await readJsonFile3(resolve4(root, "export.json"));
+  const manifest = await readJsonFile3(resolve5(root, "export.json"));
   if (!isRecord8(manifest) || manifest.schemaVersion !== "miku-confluence.export/v1" || manifest.complete !== true || !isRecord8(manifest.api) || typeof manifest.api.openApiSha256 !== "string" || !/^[a-f0-9]{64}$/u.test(manifest.api.openApiSha256)) return invalidSnapshot3();
-  const tree = await readJsonFile3(resolve4(root, "tree.json"));
+  const tree = await readJsonFile3(resolve5(root, "tree.json"));
   if (!isRecord8(tree) || tree.schemaVersion !== "miku-confluence.tree/v1" || !Array.isArray(tree.nodes)) return invalidSnapshot3();
   const targetNode = tree.nodes.find((node) => isRecord8(node) && node.pageId === input.pageId && node.artifactStatus === "written");
   if (targetNode === void 0) {
@@ -11633,13 +11759,13 @@ async function readPrepareSource(input) {
       pageId: input.pageId
     } };
   }
-  const pageDirectory = resolve4(root, "pages", input.pageId);
+  const pageDirectory = resolve5(root, "pages", input.pageId);
   const pageDirectoryStat = await safeLstat3(pageDirectory);
   if (pageDirectoryStat === void 0 || !pageDirectoryStat.isDirectory() || pageDirectoryStat.isSymbolicLink()) return invalidSnapshot3();
-  const page = await readJsonFile3(resolve4(pageDirectory, "page.api-v2.json"));
-  const storage = await readRegularTextFile3(resolve4(pageDirectory, "body.storage.xml"));
+  const page = await readJsonFile3(resolve5(pageDirectory, "page.api-v2.json"));
+  const storage = await readRegularTextFile3(resolve5(pageDirectory, "body.storage.xml"));
   if (!isRecord8(page) || page.id !== input.pageId || page.status !== "current" || typeof page.title !== "string" || page.title.length === 0 || !isRecord8(page.version) || !Number.isSafeInteger(page.version.number) || page.version.number < 1 || storage === void 0 || storageValue3(page) !== storage) return invalidSnapshot3();
-  const workingMarkdown = await readRegularTextFile3(resolve4(input.workingMarkdownPath));
+  const workingMarkdown = await readRegularTextFile3(resolve5(input.workingMarkdownPath));
   if (workingMarkdown === void 0) {
     return { ok: false, diagnostic: {
       severity: "error",
@@ -11674,10 +11800,10 @@ async function writeBlockedPlan(writer, source, initialMarkdown, problem) {
   const diagnostic4 = profileDiagnostic(problem, problem.code === "TITLE_CHANGE_NOT_SUPPORTED" ? "working-markdown" : "base-storage");
   const diagnostics = diagnosticsDocument2(source.pageId, false, [diagnostic4]);
   const artifacts = {
-    baseStorage: await writer.writeArtifact("baseStorage", source.baseStorage),
-    initialMarkdown: await writer.writeArtifact("initialMarkdown", initialMarkdown),
-    workingMarkdown: await writer.writeArtifact("workingMarkdown", source.workingMarkdown),
-    diagnostics: await writer.writeArtifact("diagnostics", `${stringifyJson(diagnostics)}
+    baseStorage: await writer.writeArtifact(artifactPath2("baseStorage"), source.baseStorage),
+    initialMarkdown: await writer.writeArtifact(artifactPath2("initialMarkdown"), initialMarkdown),
+    workingMarkdown: await writer.writeArtifact(artifactPath2("workingMarkdown"), source.workingMarkdown),
+    diagnostics: await writer.writeArtifact(artifactPath2("diagnostics"), `${stringifyJson(diagnostics)}
 `)
   };
   const plan = planDocument(source, artifacts, {
@@ -11689,25 +11815,25 @@ async function writeBlockedPlan(writer, source, initialMarkdown, problem) {
     blockerCount: 1
   });
   const planDigest = sha256(canonicalJson(plan));
-  await writer.writePlan({ ...plan, planDigest: { algorithm: "sha256", canonicalization: "RFC8785", value: planDigest } });
+  await writer.writeJson("update-plan.json", { ...plan, planDigest: { algorithm: "sha256", canonicalization: "RFC8785", value: planDigest } });
   return { ...artifacts, planDigest };
 }
 async function writeCompletePlan(writer, source, input) {
   const artifacts = {
-    baseStorage: await writer.writeArtifact("baseStorage", source.baseStorage),
-    initialMarkdown: await writer.writeArtifact("initialMarkdown", input.initialMarkdown),
-    workingMarkdown: await writer.writeArtifact("workingMarkdown", source.workingMarkdown),
-    candidateStorage: await writer.writeArtifact("candidateStorage", input.candidateStorage),
-    previewMarkdown: await writer.writeArtifact("previewMarkdown", input.previewMarkdown),
-    equivalence: await writer.writeArtifact("equivalence", `${stringifyJson(input.equivalence)}
+    baseStorage: await writer.writeArtifact(artifactPath2("baseStorage"), source.baseStorage),
+    initialMarkdown: await writer.writeArtifact(artifactPath2("initialMarkdown"), input.initialMarkdown),
+    workingMarkdown: await writer.writeArtifact(artifactPath2("workingMarkdown"), source.workingMarkdown),
+    candidateStorage: await writer.writeArtifact(artifactPath2("candidateStorage"), input.candidateStorage),
+    previewMarkdown: await writer.writeArtifact(artifactPath2("previewMarkdown"), input.previewMarkdown),
+    equivalence: await writer.writeArtifact(artifactPath2("equivalence"), `${stringifyJson(input.equivalence)}
 `),
-    diff: await writer.writeArtifact("diff", input.diff),
-    diagnostics: await writer.writeArtifact("diagnostics", `${stringifyJson(input.diagnostics)}
+    diff: await writer.writeArtifact(artifactPath2("diff"), input.diff),
+    diagnostics: await writer.writeArtifact(artifactPath2("diagnostics"), `${stringifyJson(input.diagnostics)}
 `)
   };
   const plan = planDocument(source, artifacts, input.assessment);
   const planDigest = sha256(canonicalJson(plan));
-  await writer.writePlan({ ...plan, planDigest: { algorithm: "sha256", canonicalization: "RFC8785", value: planDigest } });
+  await writer.writeJson("update-plan.json", { ...plan, planDigest: { algorithm: "sha256", canonicalization: "RFC8785", value: planDigest } });
   return { ...artifacts, planDigest };
 }
 function planDocument(source, artifacts, assessment) {
@@ -11870,7 +11996,7 @@ function digestMismatch(message, path2, pageId) {
 }
 async function safeLstat3(path2) {
   try {
-    return await lstat4(path2);
+    return await lstat5(path2);
   } catch {
     return void 0;
   }
@@ -11904,46 +12030,16 @@ function isRecord8(value) {
 function escapeHeading3(value) {
   return value.replace(/([\\`*_#{}\[\]~<>|])/gu, "\\$1").replace(/\r?\n/gu, " ");
 }
-var MarkdownUpdateWriter;
 var init_markdown_update_prepare = __esm({
   "src/adapters/filesystem/markdown-update-prepare.ts"() {
     "use strict";
+    init_atomic_artifact_writer();
     init_snapshot_writer();
     init_storage_to_markdown();
     init_markdown_storage_profile();
     init_json();
     init_prepare_markdown_update();
     init_markdown_preserving_update_prepare();
-    MarkdownUpdateWriter = class _MarkdownUpdateWriter {
-      constructor(plan, stagingDirectory) {
-        this.plan = plan;
-        this.stagingDirectory = stagingDirectory;
-      }
-      plan;
-      stagingDirectory;
-      static async create(plan) {
-        const stagingDirectory = await mkdtemp4(resolve4(dirname4(plan.finalDirectory), `.${basename4(plan.finalDirectory)}.miku-confluence-staging-`));
-        return new _MarkdownUpdateWriter(plan, stagingDirectory);
-      }
-      async writeArtifact(name, value) {
-        const path2 = artifactPath2(name);
-        const target = resolve4(this.stagingDirectory, path2);
-        await mkdir4(dirname4(target), { recursive: true });
-        await writeFile5(target, value, "utf8");
-        return { path: path2, sha256: sha256(value) };
-      }
-      async writePlan(value) {
-        await writeFile5(resolve4(this.stagingDirectory, "update-plan.json"), `${stringifyJson(value)}
-`, "utf8");
-      }
-      async finalize() {
-        if (await safeLstat3(this.plan.finalDirectory) !== void 0) throw new Error("final output exists");
-        await rename4(this.stagingDirectory, this.plan.finalDirectory);
-      }
-      async abort() {
-        await rm4(this.stagingDirectory, { recursive: true, force: true });
-      }
-    };
   }
 });
 
@@ -12024,8 +12120,8 @@ var init_inspect_markdown_preservation = __esm({
 });
 
 // src/adapters/filesystem/markdown-preservation-inspect.ts
-import { lstat as lstat5, mkdir as mkdir5, mkdtemp as mkdtemp5, readFile as readFile4, rename as rename5, rm as rm5, writeFile as writeFile6 } from "node:fs/promises";
-import { basename as basename5, dirname as dirname5, resolve as resolve5 } from "node:path";
+import { lstat as lstat6, mkdir as mkdir4, mkdtemp as mkdtemp4, readFile as readFile4, rename as rename4, rm as rm4, writeFile as writeFile5 } from "node:fs/promises";
+import { basename as basename4, dirname as dirname5, resolve as resolve6 } from "node:path";
 async function inspectMarkdownPreservation(input) {
   const source = await readInspectionSource(input);
   if (source.ok === false) return inspectMarkdownPreservationFailure([source.diagnostic]);
@@ -12130,21 +12226,21 @@ async function inspectMarkdownPreservation(input) {
   }
 }
 async function readInspectionSource(input) {
-  const root = resolve5(input.snapshotDirectory);
+  const root = resolve6(input.snapshotDirectory);
   const rootStat = await safeLstat4(root);
   if (rootStat === void 0 || !rootStat.isDirectory() || rootStat.isSymbolicLink()) return invalidSnapshot4();
-  const manifest = await readJsonFile4(resolve5(root, "export.json"));
-  const tree = await readJsonFile4(resolve5(root, "tree.json"));
+  const manifest = await readJsonFile4(resolve6(root, "export.json"));
+  const tree = await readJsonFile4(resolve6(root, "tree.json"));
   if (!isRecord10(manifest) || manifest.schemaVersion !== "miku-confluence.export/v1" || manifest.complete !== true || !isRecord10(tree) || tree.schemaVersion !== "miku-confluence.tree/v1" || !Array.isArray(tree.nodes)) return invalidSnapshot4();
   if (!tree.nodes.some((node) => isRecord10(node) && node.pageId === input.pageId && node.artifactStatus === "written")) return sourceFailure2("PAGE_ID_MISMATCH", "The requested page ID is not a written page in the complete snapshot.", input.pageId);
-  const pageDirectory = resolve5(root, "pages", input.pageId);
+  const pageDirectory = resolve6(root, "pages", input.pageId);
   const pageDirectoryStat = await safeLstat4(pageDirectory);
   if (pageDirectoryStat === void 0 || !pageDirectoryStat.isDirectory() || pageDirectoryStat.isSymbolicLink()) return invalidSnapshot4();
-  const page = await readJsonFile4(resolve5(pageDirectory, "page.api-v2.json"));
-  const storage = await readRegularTextFile4(resolve5(pageDirectory, "body.storage.xml"));
+  const page = await readJsonFile4(resolve6(pageDirectory, "page.api-v2.json"));
+  const storage = await readRegularTextFile4(resolve6(pageDirectory, "body.storage.xml"));
   if (!isRecord10(page) || page.id !== input.pageId || page.status !== "current" || typeof page.title !== "string" || !isRecord10(page.version) || typeof page.version.number !== "number" || !Number.isSafeInteger(page.version.number) || page.version.number < 1 || storage === void 0 || storageValue4(page) !== storage) return invalidSnapshot4();
   const pageVersion2 = page.version.number;
-  const workingPath = resolve5(input.workingMarkdownPath);
+  const workingPath = resolve6(input.workingMarkdownPath);
   const workingMarkdown = await readRegularTextFile4(workingPath);
   if (workingMarkdown === void 0) return sourceFailure2("INVALID_INPUT", "The working Markdown path must name a regular, non-symbolic-link UTF-8 file.", input.pageId, "$.workingMarkdownPath");
   const document = parsePreservationDocument(workingMarkdown, page.title);
@@ -12153,8 +12249,8 @@ async function readInspectionSource(input) {
     return sourceFailure2("PRESERVATION_BASE_MISMATCH", "The working Markdown provenance does not match the complete snapshot page.", input.pageId, "$.workingMarkdownPath");
   }
   const workingDirectory = dirname5(workingPath);
-  const sidecarPath = resolve5(workingDirectory, document.value.frontMatter.attributesPath);
-  if (sidecarPath !== resolve5(workingDirectory, "page.attributes.json")) return sourceFailure2("PRESERVATION_SIDECAR_MISSING", "The generated attribute sidecar path is unsafe or unsupported.", input.pageId, "$.workingMarkdownPath");
+  const sidecarPath = resolve6(workingDirectory, document.value.frontMatter.attributesPath);
+  if (sidecarPath !== resolve6(workingDirectory, "page.attributes.json")) return sourceFailure2("PRESERVATION_SIDECAR_MISSING", "The generated attribute sidecar path is unsafe or unsupported.", input.pageId, "$.workingMarkdownPath");
   const sidecarText = await readRegularTextFile4(sidecarPath);
   if (sidecarText === void 0) return sourceFailure2("PRESERVATION_SIDECAR_MISSING", "The generated attribute sidecar is missing or unsafe.", input.pageId, "$.workingMarkdownPath");
   if (sha256(sidecarText) !== document.value.frontMatter.attributesSha256) return sourceFailure2("PRESERVATION_SIDECAR_DIGEST_MISMATCH", "The attribute sidecar bytes do not match the front matter digest.", input.pageId, "$.workingMarkdownPath");
@@ -12208,7 +12304,7 @@ function invalidSnapshot4() {
 }
 async function safeLstat4(path2) {
   try {
-    return await lstat5(path2);
+    return await lstat6(path2);
   } catch {
     return void 0;
   }
@@ -12257,26 +12353,26 @@ var init_markdown_preservation_inspect = __esm({
       plan;
       stagingDirectory;
       static async create(plan) {
-        const stagingDirectory = await mkdtemp5(resolve5(dirname5(plan.finalDirectory), `.${basename5(plan.finalDirectory)}.miku-confluence-staging-`));
-        await mkdir5(resolve5(stagingDirectory, "artifacts"));
+        const stagingDirectory = await mkdtemp4(resolve6(dirname5(plan.finalDirectory), `.${basename4(plan.finalDirectory)}.miku-confluence-staging-`));
+        await mkdir4(resolve6(stagingDirectory, "artifacts"));
         return new _PreservationInspectionWriter(plan, stagingDirectory);
       }
       async writeArtifact(name, value) {
         const content = `${stringifyJson(value)}
 `;
-        await writeFile6(resolve5(this.stagingDirectory, "artifacts", name), content, "utf8");
+        await writeFile5(resolve6(this.stagingDirectory, "artifacts", name), content, "utf8");
         return { path: `artifacts/${name}`, sha256: sha256(content) };
       }
       async writeManifest(value) {
-        await writeFile6(resolve5(this.stagingDirectory, "preservation-inspection.json"), `${stringifyJson(value)}
+        await writeFile5(resolve6(this.stagingDirectory, "preservation-inspection.json"), `${stringifyJson(value)}
 `, "utf8");
       }
       async finalize() {
         if (await safeLstat4(this.plan.finalDirectory) !== void 0) throw new Error("final output exists");
-        await rename5(this.stagingDirectory, this.plan.finalDirectory);
+        await rename4(this.stagingDirectory, this.plan.finalDirectory);
       }
       async abort() {
-        await rm5(this.stagingDirectory, { recursive: true, force: true });
+        await rm4(this.stagingDirectory, { recursive: true, force: true });
       }
     };
   }
@@ -12348,8 +12444,8 @@ var init_apply_markdown_update = __esm({
 });
 
 // src/adapters/filesystem/markdown-update-apply.ts
-import { lstat as lstat6, mkdir as mkdir6, mkdtemp as mkdtemp6, readFile as readFile5, rename as rename6, rm as rm6, writeFile as writeFile7 } from "node:fs/promises";
-import { basename as basename6, dirname as dirname6, resolve as resolve6 } from "node:path";
+import { lstat as lstat7, mkdir as mkdir5, mkdtemp as mkdtemp5, readFile as readFile5, rename as rename5, rm as rm5, writeFile as writeFile6 } from "node:fs/promises";
+import { basename as basename5, dirname as dirname6, resolve as resolve7 } from "node:path";
 async function inspectMarkdownUpdateApply(input) {
   const loaded = await loadPlan(input);
   if (loaded.ok === false) return loaded;
@@ -12472,10 +12568,10 @@ async function applyUpdate(plan, attemptDirectory, writer, api) {
   return success2(plan, "updated", 3, diagnostics, attemptDirectory);
 }
 async function loadPlan(input) {
-  const planDirectory = resolve6(input.planDirectory);
+  const planDirectory = resolve7(input.planDirectory);
   const directory = await safeLstat5(planDirectory);
   if (directory === void 0 || !directory.isDirectory() || directory.isSymbolicLink()) return invalidPlan("The plan directory must be a non-symbolic-link directory.");
-  const raw = await readJsonFile5(resolve6(planDirectory, "update-plan.json"));
+  const raw = await readJsonFile5(resolve7(planDirectory, "update-plan.json"));
   if (!isRecord12(raw)) return invalidPlan("update-plan.json is missing or invalid.");
   const declaredDigest = digestValue(raw.planDigest);
   if (declaredDigest === void 0) return invalidPlan("The plan digest is missing or invalid.");
@@ -12673,7 +12769,7 @@ function artifactReference(value) {
 }
 function artifactTarget(planDirectory, path2) {
   if (!/^(?!\/)(?!.*(?:^|\/)\.\.(?:\/|$))[A-Za-z0-9._/-]+$/u.test(path2)) return void 0;
-  const target = resolve6(planDirectory, path2);
+  const target = resolve7(planDirectory, path2);
   return target.startsWith(`${planDirectory}/`) ? target : void 0;
 }
 function stringValue(value) {
@@ -12693,7 +12789,7 @@ function isRecord12(value) {
 }
 async function safeLstat5(path2) {
   try {
-    return await lstat6(path2);
+    return await lstat7(path2);
   } catch {
     return void 0;
   }
@@ -12732,24 +12828,24 @@ var init_markdown_update_apply = __esm({
       plan;
       stagingDirectory;
       static async create(plan) {
-        const stagingDirectory = await mkdtemp6(resolve6(dirname6(plan.finalDirectory), `.${basename6(plan.finalDirectory)}.miku-confluence-staging-`));
+        const stagingDirectory = await mkdtemp5(resolve7(dirname6(plan.finalDirectory), `.${basename5(plan.finalDirectory)}.miku-confluence-staging-`));
         return new _MarkdownUpdateAttemptWriter(plan, stagingDirectory);
       }
       async writeArtifact(path2, value) {
-        const target = resolve6(this.stagingDirectory, "artifacts", path2);
-        await mkdir6(dirname6(target), { recursive: true });
-        await writeFile7(target, value, "utf8");
+        const target = resolve7(this.stagingDirectory, "artifacts", path2);
+        await mkdir5(dirname6(target), { recursive: true });
+        await writeFile6(target, value, "utf8");
       }
       async writeAttempt(value) {
-        await writeFile7(resolve6(this.stagingDirectory, "attempt.json"), `${stringifyJson(value)}
+        await writeFile6(resolve7(this.stagingDirectory, "attempt.json"), `${stringifyJson(value)}
 `, "utf8");
       }
       async finalize() {
         if (await safeLstat5(this.plan.finalDirectory) !== void 0) throw new Error("final output exists");
-        await rename6(this.stagingDirectory, this.plan.finalDirectory);
+        await rename5(this.stagingDirectory, this.plan.finalDirectory);
       }
       async abort() {
-        await rm6(this.stagingDirectory, { recursive: true, force: true });
+        await rm5(this.stagingDirectory, { recursive: true, force: true });
       }
     };
   }
@@ -12812,8 +12908,8 @@ var init_apply_markdown_create = __esm({
 });
 
 // src/adapters/filesystem/markdown-create-apply.ts
-import { lstat as lstat7, mkdir as mkdir7, mkdtemp as mkdtemp7, readFile as readFile6, rename as rename7, rm as rm7, writeFile as writeFile8 } from "node:fs/promises";
-import { basename as basename7, dirname as dirname7, resolve as resolve7 } from "node:path";
+import { lstat as lstat8, mkdir as mkdir6, mkdtemp as mkdtemp6, readFile as readFile6, rename as rename6, rm as rm6, writeFile as writeFile7 } from "node:fs/promises";
+import { basename as basename6, dirname as dirname7, resolve as resolve8 } from "node:path";
 async function inspectMarkdownCreateApply(input) {
   const plan = await loadPlan2(input);
   if (plan.ok === false) return plan;
@@ -12910,10 +13006,10 @@ async function createAndVerify(plan, attemptDirectory, writer, api) {
   return success3(plan, "created", 2, diagnostics, attemptDirectory, createdId);
 }
 async function loadPlan2(input) {
-  const directory = resolve7(input.planDirectory);
+  const directory = resolve8(input.planDirectory);
   const stat = await safeLstat6(directory);
   if (stat === void 0 || !stat.isDirectory() || stat.isSymbolicLink()) return invalidPlan2("The plan directory must be a non-symbolic-link directory.");
-  const raw = await readJsonFile6(resolve7(directory, "create-plan.json"));
+  const raw = await readJsonFile6(resolve8(directory, "create-plan.json"));
   if (!isRecord14(raw)) return invalidPlan2("create-plan.json is missing or invalid.");
   const declared = digestValue2(raw.planDigest);
   if (declared === void 0) return invalidPlan2("The plan digest is missing or invalid.");
@@ -13053,7 +13149,7 @@ function artifactReference2(value) {
 }
 function artifactTarget2(directory, path2) {
   if (!/^(?!\/)(?!.*(?:^|\/)\.\.(?:\/|$))[A-Za-z0-9._/-]+$/u.test(path2)) return void 0;
-  const target = resolve7(directory, path2);
+  const target = resolve8(directory, path2);
   return target.startsWith(`${directory}/`) ? target : void 0;
 }
 function decimalId(value) {
@@ -13076,7 +13172,7 @@ function isRecord14(value) {
 }
 async function safeLstat6(path2) {
   try {
-    return await lstat7(path2);
+    return await lstat8(path2);
   } catch {
     return void 0;
   }
@@ -13115,23 +13211,23 @@ var init_markdown_create_apply = __esm({
       plan;
       stagingDirectory;
       static async create(plan) {
-        return new _MarkdownCreateAttemptWriter(plan, await mkdtemp7(resolve7(dirname7(plan.finalDirectory), `.${basename7(plan.finalDirectory)}.miku-confluence-staging-`)));
+        return new _MarkdownCreateAttemptWriter(plan, await mkdtemp6(resolve8(dirname7(plan.finalDirectory), `.${basename6(plan.finalDirectory)}.miku-confluence-staging-`)));
       }
       async writeArtifact(name, value) {
-        const target = resolve7(this.stagingDirectory, "artifacts", name);
-        await mkdir7(dirname7(target), { recursive: true });
-        await writeFile8(target, value, "utf8");
+        const target = resolve8(this.stagingDirectory, "artifacts", name);
+        await mkdir6(dirname7(target), { recursive: true });
+        await writeFile7(target, value, "utf8");
       }
       async writeAttempt(value) {
-        await writeFile8(resolve7(this.stagingDirectory, "attempt.json"), `${stringifyJson(value)}
+        await writeFile7(resolve8(this.stagingDirectory, "attempt.json"), `${stringifyJson(value)}
 `, "utf8");
       }
       async finalize() {
         if (await safeLstat6(this.plan.finalDirectory) !== void 0) throw new Error("final output exists");
-        await rename7(this.stagingDirectory, this.plan.finalDirectory);
+        await rename6(this.stagingDirectory, this.plan.finalDirectory);
       }
       async abort() {
-        await rm7(this.stagingDirectory, { recursive: true, force: true });
+        await rm6(this.stagingDirectory, { recursive: true, force: true });
       }
     };
   }
@@ -16620,8 +16716,8 @@ var init_prepare_markdown_create = __esm({
 });
 
 // src/adapters/filesystem/markdown-create-prepare.ts
-import { lstat as lstat8, mkdir as mkdir8, mkdtemp as mkdtemp8, readFile as readFile7, rename as rename8, rm as rm8, writeFile as writeFile9 } from "node:fs/promises";
-import { basename as basename8, dirname as dirname8, resolve as resolve8 } from "node:path";
+import { lstat as lstat9, readFile as readFile7 } from "node:fs/promises";
+import { resolve as resolve9 } from "node:path";
 async function prepareMarkdownCreate(input) {
   const working = await readWorkingMarkdown(input);
   if (working.ok === false) return prepareMarkdownCreateFailure([working.diagnostic]);
@@ -16630,7 +16726,7 @@ async function prepareMarkdownCreate(input) {
   const source = { spaceId: input.spaceId, parentPageId: input.parentPageId, title: input.title, workingMarkdown: working.value };
   let writer;
   try {
-    writer = await MarkdownCreatePlanWriter.create(outputPlan.value);
+    writer = await AtomicArtifactWriter.create(outputPlan.value);
     const normalizedWorking = parseWorkingMarkdown(source.workingMarkdown, source.title);
     if (normalizedWorking.ok === false) {
       const prepared = await writeBlockedPlan2(writer, source, normalizedWorking.problem);
@@ -16663,10 +16759,10 @@ async function prepareMarkdownCreate(input) {
     }
     const diagnostics = diagnosticsDocument4(true, []);
     const artifacts = {
-      workingMarkdown: await writer.writeArtifact("workingMarkdown", source.workingMarkdown),
-      candidateStorage: await writer.writeArtifact("candidateStorage", candidateStorage),
-      previewMarkdown: await writer.writeArtifact("previewMarkdown", previewMarkdown),
-      equivalence: await writer.writeArtifact("equivalence", `${stringifyJson({
+      workingMarkdown: await writer.writeArtifact(artifactPath3("workingMarkdown"), source.workingMarkdown),
+      candidateStorage: await writer.writeArtifact(artifactPath3("candidateStorage"), candidateStorage),
+      previewMarkdown: await writer.writeArtifact(artifactPath3("previewMarkdown"), previewMarkdown),
+      equivalence: await writer.writeArtifact(artifactPath3("equivalence"), `${stringifyJson({
         schemaVersion: "miku-confluence.markdown-create-equivalence/v1",
         profileVersion: markdownStorageProfileVersion,
         target: { spaceId: source.spaceId, parentPageId: source.parentPageId, title: source.title },
@@ -16675,12 +16771,12 @@ async function prepareMarkdownCreate(input) {
         comparison: comparison2
       })}
 `),
-      diagnostics: await writer.writeArtifact("diagnostics", `${stringifyJson(diagnostics)}
+      diagnostics: await writer.writeArtifact(artifactPath3("diagnostics"), `${stringifyJson(diagnostics)}
 `)
     };
     const plan = createPlanDocument(source, artifacts, { generation: "complete", applyAction: "create", applyEligible: true, blockerCount: 0 });
     const planDigest = sha256(canonicalJson(plan));
-    await writer.writePlan({ ...plan, planDigest: { algorithm: "sha256", canonicalization: "RFC8785", value: planDigest } });
+    await writer.writeJson("create-plan.json", { ...plan, planDigest: { algorithm: "sha256", canonicalization: "RFC8785", value: planDigest } });
     await writer.finalize();
     return successEnvelope2(source, planDigest, input.outputDirectory);
   } catch {
@@ -16689,7 +16785,7 @@ async function prepareMarkdownCreate(input) {
   }
 }
 async function readWorkingMarkdown(input) {
-  const markdown = await readRegularTextFile7(resolve8(input.workingMarkdownPath));
+  const markdown = await readRegularTextFile7(resolve9(input.workingMarkdownPath));
   if (markdown === void 0) return invalidInput8("$.workingMarkdownPath", "must name a regular, non-symbolic-link UTF-8 file");
   const digest3 = sha256(markdown);
   if (input.expectedWorkingMarkdownSha256 !== void 0 && input.expectedWorkingMarkdownSha256 !== digest3) {
@@ -16700,13 +16796,13 @@ async function readWorkingMarkdown(input) {
 async function writeBlockedPlan2(writer, source, problem) {
   const diagnostics = diagnosticsDocument4(false, [{ severity: "error", code: problem.code, message: problem.message, blocking: true, ...problem.nodePath === void 0 ? {} : { nodePath: problem.nodePath } }]);
   const artifacts = {
-    workingMarkdown: await writer.writeArtifact("workingMarkdown", source.workingMarkdown),
-    diagnostics: await writer.writeArtifact("diagnostics", `${stringifyJson(diagnostics)}
+    workingMarkdown: await writer.writeArtifact(artifactPath3("workingMarkdown"), source.workingMarkdown),
+    diagnostics: await writer.writeArtifact(artifactPath3("diagnostics"), `${stringifyJson(diagnostics)}
 `)
   };
   const plan = createPlanDocument(source, artifacts, { generation: "blocked", applyAction: "blocked", applyEligible: false, blockerCount: 1 });
   const planDigest = sha256(canonicalJson(plan));
-  await writer.writePlan({ ...plan, planDigest: { algorithm: "sha256", canonicalization: "RFC8785", value: planDigest } });
+  await writer.writeJson("create-plan.json", { ...plan, planDigest: { algorithm: "sha256", canonicalization: "RFC8785", value: planDigest } });
   return { planDigest };
 }
 function createPlanDocument(source, artifacts, assessment) {
@@ -16759,7 +16855,7 @@ function invalidInput8(path2, reason) {
 }
 async function readRegularTextFile7(path2) {
   try {
-    const stat = await lstat8(path2);
+    const stat = await lstat9(path2);
     if (!stat.isFile() || stat.isSymbolicLink()) return void 0;
     return await readFile7(path2, "utf8");
   } catch {
@@ -16776,50 +16872,15 @@ function artifactPath3(name) {
   };
   return paths[name];
 }
-var MarkdownCreatePlanWriter;
 var init_markdown_create_prepare = __esm({
   "src/adapters/filesystem/markdown-create-prepare.ts"() {
     "use strict";
+    init_atomic_artifact_writer();
     init_snapshot_writer();
     init_json();
     init_markdown_storage_profile();
     init_confluence_v2_operations();
     init_prepare_markdown_create();
-    MarkdownCreatePlanWriter = class _MarkdownCreatePlanWriter {
-      constructor(plan, stagingDirectory) {
-        this.plan = plan;
-        this.stagingDirectory = stagingDirectory;
-      }
-      plan;
-      stagingDirectory;
-      static async create(plan) {
-        const stagingDirectory = await mkdtemp8(resolve8(dirname8(plan.finalDirectory), `.${basename8(plan.finalDirectory)}.miku-confluence-staging-`));
-        return new _MarkdownCreatePlanWriter(plan, stagingDirectory);
-      }
-      async writeArtifact(name, value) {
-        const path2 = artifactPath3(name);
-        const target = resolve8(this.stagingDirectory, path2);
-        await mkdir8(dirname8(target), { recursive: true });
-        await writeFile9(target, value, "utf8");
-        return { path: path2, sha256: sha256(value) };
-      }
-      async writePlan(value) {
-        await writeFile9(resolve8(this.stagingDirectory, "create-plan.json"), `${stringifyJson(value)}
-`, "utf8");
-      }
-      async finalize() {
-        try {
-          await lstat8(this.plan.finalDirectory);
-          throw new Error("final output exists");
-        } catch (error) {
-          if (error.code !== "ENOENT") throw error;
-        }
-        await rename8(this.stagingDirectory, this.plan.finalDirectory);
-      }
-      async abort() {
-        await rm8(this.stagingDirectory, { recursive: true, force: true });
-      }
-    };
   }
 });
 
@@ -16889,8 +16950,8 @@ var init_snapshot_import = __esm({
 });
 
 // src/adapters/filesystem/snapshot-import-apply.ts
-import { lstat as lstat9, mkdir as mkdir9, mkdtemp as mkdtemp9, readFile as readFile8, rename as rename9, rm as rm9, writeFile as writeFile10 } from "node:fs/promises";
-import { basename as basename9, dirname as dirname9, resolve as resolve9 } from "node:path";
+import { lstat as lstat10, mkdir as mkdir7, mkdtemp as mkdtemp7, readFile as readFile8, rename as rename7, rm as rm7, writeFile as writeFile8 } from "node:fs/promises";
+import { basename as basename7, dirname as dirname8, resolve as resolve10 } from "node:path";
 async function inspectSnapshotImportApply(input) {
   const plan = await loadPlan3(input);
   if (plan.ok === false) return plan;
@@ -16956,7 +17017,7 @@ async function stop(writer, inspection, mapping, requestCount, outcome, diagnost
   return failure5(inspection.plan, outcome, Object.keys(mapping).length, requestCount, inspection.outputPlan.outputDirectory, diagnostics);
 }
 async function loadPlan3(input) {
-  const directory = resolve9(input.planDirectory);
+  const directory = resolve10(input.planDirectory);
   const stat = await safeLstat7(directory);
   if (stat === void 0 || !stat.isDirectory() || stat.isSymbolicLink()) return invalidPlan3("The plan directory must be a non-symbolic-link directory.");
   const raw = parseJson4(await regularText(directory, "snapshot-import-plan.json"));
@@ -17017,7 +17078,7 @@ async function artifactContent(directory, reference) {
 }
 async function safeLstat7(path2) {
   try {
-    return await lstat9(path2);
+    return await lstat10(path2);
   } catch {
     return void 0;
   }
@@ -17028,7 +17089,7 @@ async function regularText(directory, relativePath) {
   for (const part of relativePath.split("/")) {
     const parent = await safeLstat7(current);
     if (parent === void 0 || !parent.isDirectory() || parent.isSymbolicLink()) return void 0;
-    current = resolve9(current, part);
+    current = resolve10(current, part);
     const stat2 = await safeLstat7(current);
     if (stat2 === void 0 || stat2.isSymbolicLink()) return void 0;
   }
@@ -17097,35 +17158,35 @@ var init_snapshot_import_apply = __esm({
       plan;
       staging;
       static async create(plan) {
-        return new _AttemptWriter(plan, await mkdtemp9(resolve9(dirname9(plan.finalDirectory), `.${basename9(plan.finalDirectory)}.miku-confluence-staging-`)));
+        return new _AttemptWriter(plan, await mkdtemp7(resolve10(dirname8(plan.finalDirectory), `.${basename7(plan.finalDirectory)}.miku-confluence-staging-`)));
       }
       async writeArtifact(path2, content) {
-        const target = resolve9(this.staging, "artifacts", path2);
-        await mkdir9(dirname9(target), { recursive: true });
-        await writeFile10(target, content, "utf8");
+        const target = resolve10(this.staging, "artifacts", path2);
+        await mkdir7(dirname8(target), { recursive: true });
+        await writeFile8(target, content, "utf8");
       }
       async writeMapping(mapping) {
         await this.writeArtifact("mapping.json", `${stringifyJson({ schemaVersion: "miku-confluence.snapshot-import-created-mapping/v1", mapping })}
 `);
       }
       async writeAttempt(value) {
-        await writeFile10(resolve9(this.staging, "attempt.json"), `${stringifyJson(value)}
+        await writeFile8(resolve10(this.staging, "attempt.json"), `${stringifyJson(value)}
 `, "utf8");
       }
       async finalize() {
         if (await safeLstat7(this.plan.finalDirectory) !== void 0) throw new Error("final output exists");
-        await rename9(this.staging, this.plan.finalDirectory);
+        await rename7(this.staging, this.plan.finalDirectory);
       }
       async abort() {
-        await rm9(this.staging, { recursive: true, force: true });
+        await rm7(this.staging, { recursive: true, force: true });
       }
     };
   }
 });
 
 // src/adapters/filesystem/snapshot-import-prepare.ts
-import { lstat as lstat10, mkdir as mkdir10, mkdtemp as mkdtemp10, readFile as readFile9, readdir as readdir2, rename as rename10, rm as rm10, writeFile as writeFile11 } from "node:fs/promises";
-import { basename as basename10, dirname as dirname10, resolve as resolve10 } from "node:path";
+import { lstat as lstat11, readFile as readFile9, readdir as readdir2 } from "node:fs/promises";
+import { resolve as resolve11 } from "node:path";
 async function prepareSnapshotImport(input) {
   const source = await readSource(input);
   if (source.ok === false) return snapshotImportFailure(prepareOperationName, [source.diagnostic]);
@@ -17133,7 +17194,7 @@ async function prepareSnapshotImport(input) {
   if (output.ok === false) return snapshotImportFailure(prepareOperationName, [output.diagnostic]);
   let writer;
   try {
-    writer = await ImportPlanWriter.create(output.value);
+    writer = await AtomicArtifactWriter.create(output.value);
     const artifacts = await writeSourceArtifacts(writer, source.value);
     const plan = {
       schemaVersion: "miku-confluence.snapshot-import-plan/v1",
@@ -17145,7 +17206,7 @@ async function prepareSnapshotImport(input) {
       safety: { requiredPermission: "CREATE", confirmation: "plan-digest", automaticRetry: false, automaticRollback: false }
     };
     const planDigest = sha256(canonicalJson(plan));
-    await writer.writePlan({ ...plan, planDigest: { algorithm: "sha256", canonicalization: "RFC8785", value: planDigest } });
+    await writer.writeJson("snapshot-import-plan.json", { ...plan, planDigest: { algorithm: "sha256", canonicalization: "RFC8785", value: planDigest } });
     await writer.finalize();
     const result3 = { action: "create", applyEligible: true, outputDirectory: input.outputDirectory, pageCount: source.value.pages.length, planDigest };
     return { schemaVersion: 1, operation: prepareOperationName, kind: "workflow", success: true, result: result3, diagnostics: [] };
@@ -17155,7 +17216,7 @@ async function prepareSnapshotImport(input) {
   }
 }
 async function readSource(input) {
-  const directory = resolve10(input.snapshotDirectory);
+  const directory = resolve11(input.snapshotDirectory);
   const stat = await safeLstat8(directory);
   if (stat === void 0 || !stat.isDirectory() || stat.isSymbolicLink()) return invalid2("SNAPSHOT_INVALID", "The snapshot directory must be a non-symbolic-link directory.");
   const exportText = await regularText2(directory, "export.json");
@@ -17196,13 +17257,13 @@ async function readSource(input) {
 }
 async function writeSourceArtifacts(writer, source) {
   const pages = {};
-  for (const page of source.pages) pages[page.id] = { api: await writer.writeArtifact(`pages/${page.id}/source.api-v2.json`, page.api), storage: await writer.writeArtifact(`pages/${page.id}/source.storage.xml`, page.storage) };
+  for (const page of source.pages) pages[page.id] = { api: await writer.writeArtifact(`artifacts/pages/${page.id}/source.api-v2.json`, page.api), storage: await writer.writeArtifact(`artifacts/pages/${page.id}/source.storage.xml`, page.storage) };
   return {
-    sourceManifest: await writer.writeArtifact("source-manifest.json", source.exportManifest),
-    tree: await writer.writeArtifact("tree.json", source.tree),
-    mapping: await writer.writeArtifact("mapping.json", `${stringifyJson({ schemaVersion: "miku-confluence.snapshot-import-mapping/v1", pages: source.pages.map((page) => ({ sourcePageId: page.id, ...page.parentSourcePageId === void 0 ? {} : { parentSourcePageId: page.parentSourcePageId }, sequence: page.sequence, title: page.title, storageSha256: sha256(page.storage) })) })}
+    sourceManifest: await writer.writeArtifact("artifacts/source-manifest.json", source.exportManifest),
+    tree: await writer.writeArtifact("artifacts/tree.json", source.tree),
+    mapping: await writer.writeArtifact("artifacts/mapping.json", `${stringifyJson({ schemaVersion: "miku-confluence.snapshot-import-mapping/v1", pages: source.pages.map((page) => ({ sourcePageId: page.id, ...page.parentSourcePageId === void 0 ? {} : { parentSourcePageId: page.parentSourcePageId }, sequence: page.sequence, title: page.title, storageSha256: sha256(page.storage) })) })}
 `),
-    diagnostics: await writer.writeArtifact("diagnostics.json", `${stringifyJson({ schemaVersion: "miku-confluence.snapshot-import-diagnostics/v1", eligible: true, summary: { error: 0, warning: 0 }, items: [] })}
+    diagnostics: await writer.writeArtifact("artifacts/diagnostics.json", `${stringifyJson({ schemaVersion: "miku-confluence.snapshot-import-diagnostics/v1", eligible: true, summary: { error: 0, warning: 0 }, items: [] })}
 `),
     pages
   };
@@ -17211,7 +17272,7 @@ async function hasAttachments(directory, pageIds) {
   for (const id2 of pageIds) {
     const attachment = await lstatWithin(directory, `pages/${id2}/attachments`);
     if (attachment?.isDirectory()) {
-      const entries = await readdir2(resolve10(directory, "pages", id2, "attachments"));
+      const entries = await readdir2(resolve11(directory, "pages", id2, "attachments"));
       if (entries.length > 0) return true;
     }
   }
@@ -17219,7 +17280,7 @@ async function hasAttachments(directory, pageIds) {
 }
 async function safeLstat8(path2) {
   try {
-    return await lstat10(path2);
+    return await lstat11(path2);
   } catch {
     return void 0;
   }
@@ -17230,7 +17291,7 @@ async function lstatWithin(directory, relativePath) {
   for (const part of relativePath.split("/")) {
     const parent = await safeLstat8(current);
     if (parent === void 0 || !parent.isDirectory() || parent.isSymbolicLink()) return void 0;
-    current = resolve10(current, part);
+    current = resolve11(current, part);
     const stat = await safeLstat8(current);
     if (stat === void 0 || stat.isSymbolicLink()) return void 0;
   }
@@ -17240,7 +17301,7 @@ async function regularText2(directory, relativePath) {
   const stat = await lstatWithin(directory, relativePath);
   if (stat === void 0 || !stat.isFile()) return void 0;
   try {
-    return await readFile9(resolve10(directory, relativePath), "utf8");
+    return await readFile9(resolve11(directory, relativePath), "utf8");
   } catch {
     return void 0;
   }
@@ -17267,43 +17328,15 @@ function isRecord18(value) {
 function hasUnremappedReference(storage) {
   return /<(?:ri:page|ri:attachment)\b|\bri:content-id\s*=/u.test(storage);
 }
-var ImportPlanWriter;
 var init_snapshot_import_prepare = __esm({
   "src/adapters/filesystem/snapshot-import-prepare.ts"() {
     "use strict";
+    init_atomic_artifact_writer();
     init_snapshot_writer();
     init_json();
     init_markdown_storage_profile();
     init_confluence_v2_operations();
     init_snapshot_import();
-    ImportPlanWriter = class _ImportPlanWriter {
-      constructor(plan, stagingDirectory) {
-        this.plan = plan;
-        this.stagingDirectory = stagingDirectory;
-      }
-      plan;
-      stagingDirectory;
-      static async create(plan) {
-        return new _ImportPlanWriter(plan, await mkdtemp10(resolve10(dirname10(plan.finalDirectory), `.${basename10(plan.finalDirectory)}.miku-confluence-staging-`)));
-      }
-      async writeArtifact(path2, value) {
-        const target = resolve10(this.stagingDirectory, "artifacts", path2);
-        await mkdir10(dirname10(target), { recursive: true });
-        await writeFile11(target, value, "utf8");
-        return { path: `artifacts/${path2}`, sha256: sha256(value) };
-      }
-      async writePlan(value) {
-        await writeFile11(resolve10(this.stagingDirectory, "snapshot-import-plan.json"), `${stringifyJson(value)}
-`, "utf8");
-      }
-      async finalize() {
-        if (await safeLstat8(this.plan.finalDirectory) !== void 0) throw new Error("final output exists");
-        await rename10(this.stagingDirectory, this.plan.finalDirectory);
-      }
-      async abort() {
-        await rm10(this.stagingDirectory, { recursive: true, force: true });
-      }
-    };
   }
 });
 
@@ -18532,6 +18565,23 @@ var init_export_subtree = __esm({
 function listOperations() {
   return { schemaVersion: 1, operations: listCatalogEntries() };
 }
+function listOperationSummaries() {
+  return {
+    schemaVersion: 1,
+    view: "summary",
+    operations: listCatalogEntries().map((entry) => ({
+      name: entry.name,
+      kind: entry.kind,
+      description: entry.description,
+      coverage: entry.coverage,
+      executable: entry.executable,
+      mutationClass: entry.mutationClass,
+      requiredPermission: entry.requiredPermission,
+      supportsDryRun: entry.supportsDryRun,
+      requiresConfirmation: entry.requiresConfirmation
+    }))
+  };
+}
 function describeOperation(name) {
   return describeCatalogEntry(name);
 }
@@ -18921,12 +18971,13 @@ function usageError(stderr, message) {
   stderr.write(`${message}
 `);
   stderr.write("usage: miku-confluence [--version|--help|-h|config init|operations list|operations describe <operation>|call <operation>]\n");
+  stderr.write("run miku-confluence --help for command discovery.\n");
   return 2;
 }
 async function main(argv = process.argv, stdin = process.stdin, stdout = process.stdout, stderr = process.stderr, dependencies = {}) {
   const args = argv.slice(2);
   if (args.length === 1 && args[0] === "--version") {
-    stdout.write(`miku-confluence ${packageVersion}
+    stdout.write(`${packageVersion}
 `);
     return 0;
   }
@@ -18934,25 +18985,58 @@ async function main(argv = process.argv, stdin = process.stdin, stdout = process
     stdout.write(helpText());
     return 0;
   }
+  if (args[0] === "config") {
+    if (args.length === 2 && isHelp(args[1])) {
+      stdout.write(configHelpText());
+      return 0;
+    }
+    if (args.length === 3 && args[1] === "init" && isHelp(args[2])) {
+      stdout.write(configHelpText());
+      return 0;
+    }
+  }
   if (args.length === 2 && args[0] === "config" && args[1] === "init") {
     const result3 = await initializeEnvTemplate(dependencies.workingDirectory ?? process.cwd());
     writeJson(stdout, result3);
     return result3.success ? 0 : 1;
   }
-  if (args.length === 2 && args[0] === "operations" && args[1] === "list") {
-    writeJson(stdout, listOperations());
-    return 0;
-  }
-  if (args.length === 3 && args[0] === "operations" && args[1] === "describe") {
-    const operation = describeOperation(args[2] ?? "");
-    if (operation === void 0) return usageError(stderr, `unknown operation: ${args[2] ?? ""}`);
-    writeJson(stdout, operation);
-    return 0;
-  }
-  if (args.length >= 2 && args[0] === "call") {
+  if (args[0] === "operations") return runOperations(args.slice(1), stdout, stderr);
+  if (args[0] === "call") {
+    if (args.length === 2 && isHelp(args[1]) || args.length === 3 && isHelp(args[2])) {
+      stdout.write(callHelpText());
+      return 0;
+    }
     return runCall(args.slice(1), stdin, stdout, stderr, dependencies);
   }
   return usageError(stderr, "invalid command");
+}
+function runOperations(args, stdout, stderr) {
+  if (args.length === 1 && isHelp(args[0])) {
+    stdout.write(operationsHelpText());
+    return 0;
+  }
+  if (args.length === 2 && (args[0] === "list" || args[0] === "describe") && isHelp(args[1])) {
+    stdout.write(operationsHelpText());
+    return 0;
+  }
+  if (args.length === 1 && args[0] === "list") {
+    writeJson(stdout, listOperations());
+    return 0;
+  }
+  if (args.length === 2 && args[0] === "list" && args[1] === "--summary") {
+    writeJson(stdout, listOperationSummaries());
+    return 0;
+  }
+  if (args.length === 2 && args[0] === "describe") {
+    const operation = describeOperation(args[1] ?? "");
+    if (operation === void 0) return usageError(stderr, `unknown operation: ${args[1] ?? ""}`);
+    writeJson(stdout, operation);
+    return 0;
+  }
+  return usageError(stderr, "invalid operations command");
+}
+function isHelp(value) {
+  return value === "--help" || value === "-h";
 }
 async function runCall(args, stdin, stdout, stderr, dependencies) {
   const name = args[0] ?? "";
@@ -19148,7 +19232,7 @@ var init_cli = __esm({
     init_permissions();
     init_help();
     init_product();
-    packageVersion = "0.3.2";
+    packageVersion = "0.4.0";
     isBundleEntry = globalThis.__MIKU_CONFLUENCE_BUNDLE_ENTRY__ === true;
     if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href && !isBundleEntry) {
       process.exitCode = await main();

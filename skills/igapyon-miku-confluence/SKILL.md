@@ -35,10 +35,11 @@ writing, or repository work.
 ## Runtime Contract
 
 - execution policy: `cli-only`
-- bundled artifact: `runtime/miku-confluence-0.3.2.mjs`
+- bundled artifact: `runtime/miku-confluence-0.4.0.mjs`
 - required Node.js: 22 or newer
-- upstream source: `miku-confluence` GitHub Release `v0.3.2`
-- normal CLI output: one JSON document on stdout
+- upstream source: `miku-confluence` GitHub Release `v0.4.0`
+- `--version`: semantic version as plain text on stdout
+- other normal CLI output: one JSON document on stdout
 - diagnostics and unexpected failures: stderr
 
 Use `lib/runtime-artifacts.mjs` for artifact resolution and
@@ -77,7 +78,7 @@ For the end-to-end safety sequence, read
   apply it.
 - Pass `--allow CREATE` or `--allow UPDATE` and
   `--confirm-destructive` only for that reviewed live-write request.
-- Never pass `DELETE`; `v0.3.2` exposes no implemented delete workflow.
+- Never pass `DELETE`; `v0.4.0` exposes no implemented delete workflow.
 - Never retry a live write automatically.
 - Keep `MIKU_CONFLUENCE_API_TOKEN`, email, Authorization headers, cookies, and
   `.env` contents out of prompts, command output summaries, logs, and artifacts.
