@@ -59,8 +59,17 @@ repository作成、push、tag、Release公開、asset upload は人間が実施�
 ## Documentation
 
 - [Development notes](docs/development.md)
+- [Markdown-first workplace layout](docs/workplace-layout.md)
+- [mikuku-articles Markdown import workflow](docs/mikuku-articles-confluence-import.md)
+- [Confluence Storage coverage workflow](docs/confluence-storage-coverage-workflow.md)
+- [Confluence Storage–DOCX review bridge specification](docx/confluence-storage-review-bridge.md)
 - [Shared miku-soft references](docs/miku-soft-reference.md)
 - [Agent-facing Skill](skills/igapyon-miku-confluence/SKILL.md)
+
+DOCX review bridge は現在、仕様と段階的同梱方針のみです。現行 runtime の
+実装済み operation としては公開していません。実装時のOffice package処理は、
+`miku-ms-office-core` のGitHub Releaseにあるversioned single-file ESM
+libraryをvendorし、実験runtimeから直接importする方針です。
 
 ## License
 
