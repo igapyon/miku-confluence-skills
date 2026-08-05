@@ -49,6 +49,48 @@ Rejected decisions:
 - runtime import bundle, because the initial Skill executes the public CLI
 - copied upstream source or product logic in the Skill layer
 
+## DOCX review bridge incubation
+
+The proposed Confluence Storage–DOCX review bridge is documented in
+[`docx/confluence-storage-review-bridge.md`](../docx/confluence-storage-review-bridge.md).
+It is not implemented or exposed by the current Skill contract.
+
+For the first implementation, this repository may temporarily bundle a
+versioned, local-only experimental runtime under
+`skills/igapyon-miku-confluence/experimental/docx-review/`. That runtime must
+vendor and directly import the versioned `miku-ms-office-core-<version>.mjs`
+library published as a GitHub Release asset. This Release `.mjs` is the
+consumer-facing ESM library, not a CLI artifact and not merely source material
+to be copied from a local checkout. Combining it into one generated runtime is
+optional; the initial Skill bundle keeps it as a separately identifiable,
+version-pinned library file.
+
+Record the selected core Release tag, asset URL, filename, and SHA-256. Include
+the matching `.mjs.map` only when local diagnostics need it. Do not import the
+core repository's `dist/*`, use a sibling `file:` dependency, or assume npm
+publication. The experimental runtime owns OOXML rendering and parsing, bridge
+manifests, DOCX review inspection, three-way conflict analysis, and Storage
+candidate preparation. It must not read credentials, call Confluence, or apply
+a live update.
+
+The released `miku-confluence` runtime remains the sole owner of Confluence
+reads and writes, page-version checks, permissions, dry-run, reviewed apply,
+and postcondition capture. During incubation, a DOCX-derived candidate enters
+that existing update boundary only after immutable-plan review and explicit
+approval.
+
+The build already copies `skills/igapyon-miku-confluence/` recursively. Once an
+experimental runtime exists, build verification must additionally require its
+versioned artifact and the pinned `miku-ms-office-core` Release library, verify
+the library digest and ESM import, regenerate the Skill index, and run an
+isolated offline smoke test. Repository-level DOCX fixtures remain under
+`tests/fixtures/` and must not be included in the installable bundle.
+
+When the schemas, diagnostics, package-safety limits, mapping profile, and
+three-way merge behavior stabilize, move the semantic implementation into the
+upstream `miku-confluence` product. Remove the experimental copy and bundle the
+released upstream artifact instead of maintaining two implementations.
+
 ## Verification
 
 Run:
